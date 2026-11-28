@@ -1,6 +1,6 @@
 # Solegram: исходный код
 
-**3.5.3-beta9 (299)**
+**3.5.3-beta10 (300)**
 
 Solegram не связан с Telegram FZ-LLC. Оригинальный README Telegram лежит в `TELEGRAM_README.md`.
 

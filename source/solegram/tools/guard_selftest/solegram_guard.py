@@ -286,10 +286,46 @@ def install(roots, package):
                 return True, permission
         return False, None
 
+    try:
+        sdk_dir = os.path.dirname(os.path.realpath(__file__))
+    except Exception:
+        sdk_dir = ""
+
+    def sdk_init(frame):
+        """True when this frame is the module body of one of the app's own Python modules (the plugin SDK:
+        client_utils, file_utils, plugin_settings...) being imported. They look up PluginsController and other
+        internals once, at import; when a plugin is the first to import one of them, the plugin is on the stack, but
+        the lookup is the SDK's own. Checked by identity: the frame's globals ARE the dict of the module of that name
+        in sys.modules (a plugin can't make its own frames pass for it without running code from strings), the
+        module is not a plugin's, and its file is the app's, not in the plugins folder."""
+        if frame is None or frame.f_code.co_name != "<module>":
+            return False
+        g = frame.f_globals
+        if id(g) in registry:
+            return False
+        name = g.get("__name__")
+        module = sys.modules.get(name) if isinstance(name, str) else None
+        if module is None or getattr(module, "__dict__", None) is not g:
+            return False
+        path = g.get("__file__")
+        if not isinstance(path, str) or not path:
+            return False
+        try:
+            path = os.path.realpath(path)
+        except Exception:
+            return False
+        # the SDK lives right beside this guard (the app's own Python files), never among plugins or their packages
+        # (Chaquopy runs these straight from the APK: the path is where they would be, not a file on disk; making
+        # plugin code look like it needs code built from strings, which the medium and strict levels refuse)
+        return (bool(sdk_dir) and under(path, sdk_dir)
+                and not under(path, plugins_dir) and not under(path, libs_dir))
+
     def check_java(name, frame):
         name = str(name).replace("/", ".")
         matched, permission = java_rule(name)
         if not matched:
+            return
+        if sdk_init(frame):
             return
         pid = plugin_at(frame)
         if pid is None:
@@ -337,6 +373,8 @@ def install(roots, package):
         matched, permission = import_rule(name)
         if not matched:
             return False
+        if sdk_init(frame):
+            return False
         pid = plugin_at(frame)
         if pid is None:
             return False
@@ -345,6 +383,8 @@ def install(roots, package):
     def check_import(name, frame):
         matched, permission = import_rule(name)
         if not matched:
+            return
+        if sdk_init(frame):
             return
         pid = plugin_at(frame)
         if pid is None:
@@ -366,19 +406,24 @@ def install(roots, package):
                       "hasUpdateHooks", "hasSendMessageHooks", "isEnabledInPrefs", "getPluginsDir", "tlName",
                       "resolveDrawable", "isPluginFileName", "pluginsQueue", "APP_EVENT_START", "APP_EVENT_STOP",
                       "APP_EVENT_PAUSE", "APP_EVENT_RESUME")
+    # what manages plugins or the protection: never through the stand-in
+    pc_never = ("install", "inspect", "delete", "setEnabled", "reloadPlugin", "applySecurityPolicy", "rescan",
+                "applyEngineState", "applyDevMode", "setEngine", "getEngine", "init", "exportState",
+                "clearAutoSafeModeFlag", "onMenuItemClick", "getMenuItems")
     pc_own = ("getSettingJson", "setSettingJson", "getAllSettingsJson", "clearSettings", "notifySettingsReload",
               "registerHook", "unregisterHook", "registerSendMessageHook", "unregisterSendMessageHook",
               "setUpdatesHook", "addMenuItem", "removeMenuItem", "reportHookError")
 
     class PluginInfo(object):
         """What a plugin may know of an installed plugin (a copy: changing it changes nothing)."""
-        __slots__ = ("id", "name", "description", "author", "version", "enabled")
+        __slots__ = ("id", "name", "description", "author", "version", "icon", "enabled", "loaded")
 
         def __init__(self, meta):
-            for field in ("id", "name", "description", "author", "version"):
+            for field in ("id", "name", "description", "author", "version", "icon"):
                 value = getattr(meta, field, None)
                 object.__setattr__(self, field, None if value is None else str(value))
-            object.__setattr__(self, "enabled", bool(getattr(meta, "enabled", False)))
+            for field in ("enabled", "loaded"):
+                object.__setattr__(self, field, bool(getattr(meta, field, False)))
 
         def __setattr__(self, key, value):
             raise AttributeError("read-only")
@@ -413,7 +458,13 @@ def install(roots, package):
                     return get_plugin
                 if attr == "getPlugins":
                     return lambda: [PluginInfo(m) for m in real.getInstance().getPlugins()]
-                deny(pid, "tamper", "%s.%s" % (pc_name, attr))
+                if attr in pc_never or attr.startswith("dispatch"):
+                    deny(pid, "tamper", "%s.%s" % (pc_name, attr))
+                # anything else (queues, look-ups, state): as the real one has it
+                try:
+                    return getattr(real.getInstance(), attr)
+                except AttributeError:
+                    return getattr(real, attr)
 
             def __setattr__(self, key, value):
                 deny(pid, "tamper", "%s.%s" % (pc_name, key))

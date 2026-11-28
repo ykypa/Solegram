@@ -965,12 +965,21 @@ public final class AutoUpdater {
                 }
                 break;
             default:
+                if (build > 0 && build <= Solegram.getBuild()) {
+                    // a late answer about a version that is installed by now (a second session for it, or one left
+                    // from an earlier try): the update went through, there is nothing to report
+                    FileLog.d("solegram update: ignoring status " + status + " for installed build " + build + ": " + message);
+                    break;
+                }
                 onInstallFailed(info, message != null ? message : "status " + status, isAppVisible());
                 break;
         }
     }
 
     private static void onInstallFailed(UpdateController.UpdateInfo info, String error, boolean tellUser) {
+        if (info != null && info.build <= Solegram.getBuild()) {
+            return; // that version runs now: whatever failed was a leftover
+        }
         // the next try goes through the system installer, where the user sees what is wrong
         prefs().edit().putInt("confirmBuild", info.build).remove("installBuild").apply();
         setStatus(STATUS_FAILED, info, error);
