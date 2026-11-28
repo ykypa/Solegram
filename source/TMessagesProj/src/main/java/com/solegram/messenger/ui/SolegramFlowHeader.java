@@ -191,7 +191,28 @@ public class SolegramFlowHeader extends FrameLayout {
                     org.telegram.ui.Components.Premium.GLIcon.Icon3D.TYPE_SOLEGRAM) {
                 @Override
                 protected void onRenderError() {
-                    fallBack();
+                    glFailed();
+                }
+
+                @Override
+                protected void onAttachedToWindow() {
+                    super.onAttachedToWindow();
+                    AndroidUtilities.cancelRunOnUIThread(glWatchdog);
+                    AndroidUtilities.runOnUIThread(glWatchdog, 2500);
+                }
+
+                @Override
+                protected void onDetachedFromWindow() {
+                    AndroidUtilities.cancelRunOnUIThread(glWatchdog);
+                    super.onDetachedFromWindow();
+                }
+
+                @Override
+                public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture surface, int width, int height) {
+                    // the list re-attaches the banner now and then (its surface comes anew): wait for the first frame
+                    // of every new start, not only the very first one
+                    whenReady(SolegramFlowHeader.this::glShown);
+                    super.onSurfaceTextureAvailable(surface, width, height);
                 }
             };
             glLogo.mRenderer.sgSun = iconLogo;
@@ -201,18 +222,65 @@ public class SolegramFlowHeader extends FrameLayout {
             }
             glLogo.setAlpha(0f);
             logoStage.addView(glLogo, LayoutHelper.createFrame(132, 132, Gravity.CENTER));
-            glLogo.whenReady(() -> {
-                if (glLogo == null) return;
-                glLogo.animate().alpha(1f).setDuration(260).start();
-                if (sparks != null) sparks.animate().alpha(1f).setDuration(420).start();
-                flatLogo.animate().alpha(0f).setDuration(200).withEndAction(() -> {
-                    if (glLogo != null) flatLogo.setVisibility(INVISIBLE);
-                }).start();
-            });
+            glLogo.whenReady(this::glShown);
         } catch (Throwable e) {
             FileLog.e(e);
             fallBack();
         }
+    }
+
+    private int glRetries;
+
+    /** Attached for a while and still no frame (the thread never got going): start it once more. */
+    private final Runnable glWatchdog = () -> {
+        if (glLogo != null && glLogo.isAttachedToWindow() && glLogo.getAlpha() <= 0f) {
+            glFailed();
+        }
+    };
+
+    /** The first frame is there: the 3D logo takes the flat icon's place. */
+    private void glShown() {
+        if (glLogo == null || glLogo.getAlpha() >= 1f) return;
+        glLogo.animate().cancel();
+        glLogo.animate().alpha(1f).setDuration(260).start();
+        if (sparks != null) sparks.animate().alpha(1f).setDuration(420).start();
+        flatLogo.animate().cancel();
+        flatLogo.animate().alpha(0f).setDuration(200).withEndAction(() -> {
+            if (glLogo != null && glLogo.getAlpha() > 0f) flatLogo.setVisibility(INVISIBLE);
+        }).start();
+    }
+
+    /**
+     * Drawing stopped on an error. Inside a list this happens when the banner's cell is re-attached while the GL thread
+     * starts (its surface goes away): the flat icon shows meanwhile and the logo tries again a few times; only a GPU
+     * that keeps failing leaves the flat icon for good.
+     */
+    private void glFailed() {
+        final org.telegram.ui.Components.Premium.GLIcon.GLIconTextureView gl = glLogo;
+        if (gl == null) return;
+        gl.animate().cancel();
+        gl.setAlpha(0f);
+        if (sparks != null) {
+            sparks.animate().cancel();
+            sparks.setAlpha(0f);
+        }
+        flatLogo.animate().cancel();
+        flatLogo.setVisibility(VISIBLE);
+        flatLogo.setAlpha(1f);
+        if (glRetries++ >= 5) {
+            fallBack();
+            return;
+        }
+        AndroidUtilities.runOnUIThread(() -> {
+            if (glLogo != gl || !gl.isAttachedToWindow()) {
+                return; // detached: the next attach starts it again by itself
+            }
+            final android.graphics.SurfaceTexture st = gl.getSurfaceTexture();
+            if (st != null && gl.getWidth() > 0 && gl.getHeight() > 0) {
+                gl.whenReady(this::glShown);
+                gl.startThread(st, gl.getWidth(), gl.getHeight());
+            }
+        }, 350L * glRetries);
     }
 
     private void fallBack() {
