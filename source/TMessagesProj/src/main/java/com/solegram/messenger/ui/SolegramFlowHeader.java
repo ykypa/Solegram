@@ -221,6 +221,8 @@ public class SolegramFlowHeader extends FrameLayout {
                 glLogo.setStarParticlesView(sparks);
             }
             glLogo.setAlpha(0f);
+            // GLIconTextureView starts paused (it draws nothing until told): the banner runs it while it is shown
+            glLogo.setPaused(false);
             // not inside the list: the list re-attaches its rows, and a TextureView there loses its surface (the logo
             // never got drawn). It lives on the list's parent, above the list and below the header bar, and follows
             // the banner's place (see placeGl)
@@ -356,6 +358,7 @@ public class SolegramFlowHeader extends FrameLayout {
             host.addView(glLogo, host.indexOfChild(list) + 1, LayoutHelper.createFrame(132, 132, Gravity.LEFT | Gravity.TOP));
         }
         glLogo.setVisibility(VISIBLE);
+        glLogo.setPaused(false);
         placeGl();
     }
 
@@ -374,8 +377,10 @@ public class SolegramFlowHeader extends FrameLayout {
         final float y = locStage[1] - locHost[1] + (logoStage.getHeight() - size) / 2f;
         if (glLogo.getTranslationX() != x) glLogo.setTranslationX(x);
         if (glLogo.getTranslationY() != y) glLogo.setTranslationY(y);
-        final int visibility = isShown() ? VISIBLE : INVISIBLE;
+        final boolean shown = isShown();
+        final int visibility = shown ? VISIBLE : INVISIBLE;
         if (glLogo.getVisibility() != visibility) glLogo.setVisibility(visibility);
+        if (glLogo.isPaused() == shown) glLogo.setPaused(!shown);
     }
 
     @Override
@@ -398,6 +403,7 @@ public class SolegramFlowHeader extends FrameLayout {
         // list's parent, with its surface kept
         if (glLogo != null && glLogo.getParent() != logoStage) {
             glLogo.setVisibility(INVISIBLE);
+            glLogo.setPaused(true); // nothing to draw meanwhile
         }
         getViewTreeObserver().removeOnPreDrawListener(gapWatcher);
         super.onDetachedFromWindow();
