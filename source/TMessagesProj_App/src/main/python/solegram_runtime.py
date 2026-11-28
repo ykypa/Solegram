@@ -41,7 +41,45 @@ _state = {
 
 # --------------------------------------------------------------------------- boot
 
+def _install_java_compat():
+    """Plugins hand a java.lang.Class (what hook_utils.find_class returns) where Chaquopy wants a class proxy:
+    dynamic_proxy(find_class("android.app.Activity$ScreenCaptureCallback")), cast(find_class(...), obj). Both are
+    taken now: a Class object is turned into the class proxy of the same name (through the guarded jclass, so the
+    usual checks apply)."""
+    import java
+
+    def as_proxy_class(x):
+        if isinstance(x, type):
+            return x  # already a class proxy
+        if hasattr(x, "isInterface") and hasattr(x, "getName"):
+            try:
+                return java.jclass(str(x.getName()))
+            except Exception:
+                return x
+        return x
+
+    original_dynamic_proxy = java.dynamic_proxy
+
+    def dynamic_proxy(*interfaces):
+        return original_dynamic_proxy(*[as_proxy_class(i) for i in interfaces])
+
+    dynamic_proxy.__doc__ = getattr(original_dynamic_proxy, "__doc__", None)
+    java.dynamic_proxy = dynamic_proxy
+
+    original_cast = getattr(java, "cast", None)
+    if original_cast is not None:
+        def cast(cls, obj):
+            return original_cast(as_proxy_class(cls), obj)
+
+        cast.__doc__ = getattr(original_cast, "__doc__", None)
+        java.cast = cast
+
+
 def init(plugins_dir, libs_dir, dex_dir, app_version, sdk_version, dev_mode=False):
+    try:
+        _install_java_compat()
+    except Exception:
+        _logger.error("java compat failed:\n%s", traceback.format_exc())
     _state.update(plugins_dir=str(plugins_dir), app_version=str(app_version), sdk_version=str(sdk_version),
                   dex_dir=str(dex_dir), dev_mode=bool(dev_mode))
     log_utils._set_dev_mode(bool(dev_mode))
