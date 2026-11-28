@@ -221,7 +221,9 @@ public class SolegramFlowHeader extends FrameLayout {
                 glLogo.setStarParticlesView(sparks);
             }
             glLogo.setAlpha(0f);
-            logoStage.addView(glLogo, LayoutHelper.createFrame(132, 132, Gravity.CENTER));
+            // not inside the list: the list re-attaches its rows, and a TextureView there loses its surface (the logo
+            // never got drawn). It lives on the list's parent, above the list and below the header bar, and follows
+            // the banner's place (see placeGl)
             glLogo.whenReady(this::glShown);
         } catch (Throwable e) {
             FileLog.e(e);
@@ -318,6 +320,7 @@ public class SolegramFlowHeader extends FrameLayout {
         if (gapAbove() != drawnGap) {
             invalidate();
         }
+        placeGl();
         return true;
     };
 
@@ -332,9 +335,53 @@ public class SolegramFlowHeader extends FrameLayout {
         return Math.max(0f, top);
     }
 
+    /** Puts the 3D logo on the list's parent (once), right above the list. */
+    private void hostGl() {
+        if (glLogo == null) return;
+        android.view.ViewParent p = getParent();
+        while (p != null && !(p instanceof androidx.recyclerview.widget.RecyclerView)) {
+            p = p.getParent();
+        }
+        if (!(p instanceof View) || !(((View) p).getParent() instanceof FrameLayout)) {
+            // not in a list (or an unusual parent): right in the banner, as before
+            if (glLogo.getParent() == null) {
+                logoStage.addView(glLogo, LayoutHelper.createFrame(132, 132, Gravity.CENTER));
+            }
+            return;
+        }
+        final View list = (View) p;
+        final FrameLayout host = (FrameLayout) list.getParent();
+        if (glLogo.getParent() != host) {
+            AndroidUtilities.removeFromParent(glLogo);
+            host.addView(glLogo, host.indexOfChild(list) + 1, LayoutHelper.createFrame(132, 132, Gravity.LEFT | Gravity.TOP));
+        }
+        glLogo.setVisibility(VISIBLE);
+        placeGl();
+    }
+
+    private final int[] locStage = new int[2], locHost = new int[2];
+
+    /** Keeps the 3D logo over the banner's logo place as the list scrolls. */
+    private void placeGl() {
+        if (glLogo == null || logoStage == null || glLogo.getParent() == logoStage || !(glLogo.getParent() instanceof View)) {
+            return;
+        }
+        final View host = (View) glLogo.getParent();
+        logoStage.getLocationInWindow(locStage);
+        host.getLocationInWindow(locHost);
+        final float size = dp(132);
+        final float x = locStage[0] - locHost[0] + (logoStage.getWidth() - size) / 2f;
+        final float y = locStage[1] - locHost[1] + (logoStage.getHeight() - size) / 2f;
+        if (glLogo.getTranslationX() != x) glLogo.setTranslationX(x);
+        if (glLogo.getTranslationY() != y) glLogo.setTranslationY(y);
+        final int visibility = isShown() ? VISIBLE : INVISIBLE;
+        if (glLogo.getVisibility() != visibility) glLogo.setVisibility(visibility);
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        hostGl();
         // so the banner may paint above itself: its cell (see UItem.setChecked at the call sites) and the list
         for (android.view.ViewParent p = getParent(); p instanceof ViewGroup; p = p.getParent()) {
             ((ViewGroup) p).setClipChildren(false);
@@ -347,6 +394,11 @@ public class SolegramFlowHeader extends FrameLayout {
 
     @Override
     protected void onDetachedFromWindow() {
+        // the banner left the screen (scrolled away, or its row is being re-attached): the logo waits hidden on the
+        // list's parent, with its surface kept
+        if (glLogo != null && glLogo.getParent() != logoStage) {
+            glLogo.setVisibility(INVISIBLE);
+        }
         getViewTreeObserver().removeOnPreDrawListener(gapWatcher);
         super.onDetachedFromWindow();
     }
