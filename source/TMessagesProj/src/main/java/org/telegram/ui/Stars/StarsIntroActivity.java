@@ -727,6 +727,11 @@ public class StarsIntroActivity extends GradientHeaderActivity implements Notifi
     }
 
     public static StarParticlesView makeParticlesView(Context context, int particlesCount, int type) {
+        return makeParticlesView(context, particlesCount, type, 0);
+    }
+
+    /** Solegram: {@code tint} != 0 colours every spark in shades of it (lighter ones among them). */
+    public static StarParticlesView makeParticlesView(Context context, int particlesCount, int type, int tint) {
         return new StarParticlesView(context) {
             Paint[] paints;
 
@@ -749,7 +754,9 @@ public class StarsIntroActivity extends GradientHeaderActivity implements Notifi
                 paints = new Paint[type == 2 ? 40 : 20];
                 for (int i = 0; i < paints.length; ++i) {
                     paints[i] = new Paint(Paint.ANTI_ALIAS_FLAG);
-                    final int col = type == 2
+                    final int col = tint != 0
+                        ? ColorUtils.blendARGB(tint | 0xFF000000, 0xFFFFFFFF, i % 4 == 0 ? 0.55f : 0.12f * (i % 3))
+                        : type == 2
                         ? (i >= 20 ? ColorUtils.blendARGB(0xFFF0A800, 0xFFE08800, (i - 20) / 19f) : i % 5 == 0 ? 0xFFFFF6DC : ColorUtils.blendARGB(0xFFFFD66B, 0xFFFFB13B, i / 19f))
                         : ColorUtils.blendARGB(0xFFFA5416, 0xFFFFC837, i / (float) (paints.length - 1));
                     paints[i].setColorFilter(new PorterDuffColorFilter(col, PorterDuff.Mode.SRC_IN));

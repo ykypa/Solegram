@@ -78,6 +78,8 @@ public class SolegramFlowHeader extends FrameLayout {
         ImageView logo = new ImageView(context);
         Drawable bg = ContextCompat.getDrawable(context, iconBackground);
         Drawable fg = ContextCompat.getDrawable(context, iconForeground);
+        // the haze, the 3D logo and its sparks take the launcher icon's own colours
+        readIconColors(bg, fg);
         logo.setImageDrawable(new LayerDrawable(new Drawable[]{bg, fg}));
         logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
         logo.setOutlineProvider(new ViewOutlineProvider() {
@@ -89,7 +91,15 @@ public class SolegramFlowHeader extends FrameLayout {
         });
         logo.setClipToOutline(true);
         logo.setElevation(dp(6));
-        content.addView(logo, LayoutHelper.createLinear(76, 76, Gravity.CENTER_HORIZONTAL));
+        // the icon's logo in 3D (turns under the finger, sparks around it, as on the welcome screen); the flat icon
+        // stays until its first frame and comes back if the GPU can't draw it
+        final FrameLayout stage = new FrameLayout(context);
+        stage.setClipChildren(false);
+        content.setClipChildren(false);
+        stage.addView(logo, LayoutHelper.createFrame(76, 76, Gravity.CENTER));
+        content.addView(stage, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 112, Gravity.CENTER_HORIZONTAL));
+        flatLogo = logo;
+        logoStage = stage;
 
         titleView = new TextView(context);
         titleView.setText(title);
@@ -104,14 +114,123 @@ public class SolegramFlowHeader extends FrameLayout {
         subtitleView.setGravity(Gravity.CENTER);
         content.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 24, 4, 24, 0));
 
+        // the sparks fill the banner behind everything
+        try {
+            sparks = org.telegram.ui.Stars.StarsIntroActivity.makeParticlesView(context, 46, 3, iconLogo);
+            sparks.setAlpha(0f);
+            addView(sparks, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP, 0, 0, 0, 40));
+        } catch (Throwable e) {
+            FileLog.e(e);
+            sparks = null;
+        }
         // a little above the middle: the lower part of the banner dissolves into the page
         addView(content, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 0, 0, 0, 28));
+        create3d(context);
 
         if (Build.VERSION.SDK_INT >= 33) {
             createShader();
         }
         updatePalette();
     }
+
+    // region the 3D logo
+
+    private ImageView flatLogo;
+    private FrameLayout logoStage;
+    private org.telegram.ui.Components.Premium.StarParticlesView sparks;
+    private org.telegram.ui.Components.Premium.GLIcon.GLIconTextureView glLogo;
+    /** The launcher icon's background, its logo's sun and lines (0 until read). */
+    private int iconBackgroundColor, iconLogo, iconLines;
+
+    private void readIconColors(Drawable bg, Drawable fg) {
+        try {
+            final android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(108, 108, android.graphics.Bitmap.Config.ARGB_8888);
+            final Canvas c = new Canvas(b);
+            bg.setBounds(0, 0, 108, 108);
+            bg.draw(c);
+            iconBackgroundColor = b.getPixel(6, 6) | 0xFF000000;
+            b.eraseColor(0);
+            fg.setBounds(0, 0, 108, 108);
+            fg.draw(c);
+            // the logo's place on the icon (viewport 108): the sun's middle and the first line's middle
+            iconLogo = opaqueOr(b.getPixel(54, 46), averageOpaque(b));
+            iconLines = opaqueOr(b.getPixel(54, 61), iconLogo);
+            b.recycle();
+        } catch (Throwable e) {
+            FileLog.e(e);
+            iconBackgroundColor = 0xFFFF5B3A;
+            iconLogo = 0xFFFFF2EF;
+            iconLines = 0xFFFFCEC4;
+        }
+    }
+
+    private static int opaqueOr(int pixel, int fallback) {
+        return Color.alpha(pixel) > 200 ? pixel | 0xFF000000 : fallback;
+    }
+
+    private static int averageOpaque(android.graphics.Bitmap b) {
+        long r = 0, g = 0, bl = 0, n = 0;
+        for (int y = 0; y < b.getHeight(); y += 2) {
+            for (int x = 0; x < b.getWidth(); x += 2) {
+                final int p = b.getPixel(x, y);
+                if (Color.alpha(p) > 200) {
+                    r += Color.red(p);
+                    g += Color.green(p);
+                    bl += Color.blue(p);
+                    n++;
+                }
+            }
+        }
+        return n == 0 ? 0xFFFFFFFF : Color.rgb((int) (r / n), (int) (g / n), (int) (bl / n));
+    }
+
+    private void create3d(Context context) {
+        try {
+            glLogo = new org.telegram.ui.Components.Premium.GLIcon.GLIconTextureView(context,
+                    org.telegram.ui.Components.Premium.GLIcon.GLIconRenderer.FRAGMENT_STYLE,
+                    org.telegram.ui.Components.Premium.GLIcon.Icon3D.TYPE_SOLEGRAM) {
+                @Override
+                protected void onRenderError() {
+                    fallBack();
+                }
+            };
+            glLogo.mRenderer.sgSun = iconLogo;
+            glLogo.mRenderer.sgLines = iconLines;
+            if (sparks != null) {
+                glLogo.setStarParticlesView(sparks);
+            }
+            glLogo.setAlpha(0f);
+            logoStage.addView(glLogo, LayoutHelper.createFrame(132, 132, Gravity.CENTER));
+            glLogo.whenReady(() -> {
+                if (glLogo == null) return;
+                glLogo.animate().alpha(1f).setDuration(260).start();
+                if (sparks != null) sparks.animate().alpha(1f).setDuration(420).start();
+                flatLogo.animate().alpha(0f).setDuration(200).withEndAction(() -> {
+                    if (glLogo != null) flatLogo.setVisibility(INVISIBLE);
+                }).start();
+            });
+        } catch (Throwable e) {
+            FileLog.e(e);
+            fallBack();
+        }
+    }
+
+    private void fallBack() {
+        final View gl = glLogo, sp = sparks;
+        glLogo = null;
+        sparks = null;
+        if (flatLogo != null) {
+            flatLogo.animate().cancel();
+            flatLogo.setVisibility(VISIBLE);
+            flatLogo.setAlpha(1f);
+        }
+        for (View v : new View[]{gl, sp}) {
+            if (v != null && v.getParent() instanceof ViewGroup) {
+                ((ViewGroup) v.getParent()).removeView(v);
+            }
+        }
+    }
+    // endregion
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
@@ -167,9 +286,13 @@ public class SolegramFlowHeader extends FrameLayout {
 
     // region colours
 
-    /** Four shades around the theme accent: the accent itself, its neighbours on the colour wheel and a light tone. */
+    /**
+     * Four shades of the launcher icon's background (the banner is the icon's colour, the logo on it in the icon's
+     * logo colour); the theme accent only when the icon could not be read.
+     */
     private void updatePalette() {
-        final int accent = Theme.getColor(Theme.key_featuredStickers_addButton);
+        final boolean fromIcon = iconBackgroundColor != 0;
+        final int accent = fromIcon ? iconBackgroundColor : Theme.getColor(Theme.key_featuredStickers_addButton);
         final int background = Theme.getColor(Theme.key_windowBackgroundGray);
         if (accent == paletteAccent && background == paletteBackground && fadePaint.getShader() != null) {
             return;
@@ -177,10 +300,18 @@ public class SolegramFlowHeader extends FrameLayout {
         paletteAccent = accent;
         paletteBackground = background;
         final boolean dark = Theme.isCurrentThemeDark();
-        palette[0] = shade(accent, 0, dark ? -0.05f : 0f);
-        palette[1] = shade(accent, 40, 0.05f);
-        palette[2] = shade(accent, -35, dark ? -0.08f : -0.02f);
-        palette[3] = shade(accent, 15, dark ? 0f : 0.12f);
+        if (fromIcon) {
+            // close to the icon's own colour: it flows, but stays that colour
+            palette[0] = accent;
+            palette[1] = shade(accent, 9, 0.05f);
+            palette[2] = shade(accent, -9, dark ? -0.08f : -0.05f);
+            palette[3] = shade(accent, 4, 0.09f);
+        } else {
+            palette[0] = shade(accent, 0, dark ? -0.05f : 0f);
+            palette[1] = shade(accent, 40, 0.05f);
+            palette[2] = shade(accent, -35, dark ? -0.08f : -0.02f);
+            palette[3] = shade(accent, 15, dark ? 0f : 0.12f);
+        }
 
         // white text unless the haze is very light
         float luminance = 0;

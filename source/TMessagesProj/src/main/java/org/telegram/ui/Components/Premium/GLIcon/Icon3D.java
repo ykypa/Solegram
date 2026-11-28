@@ -63,6 +63,9 @@ public class Icon3D {
     public float spec2 = 0.13f;
     public float diffuse = 1f;
     public int gradientColor1;
+    /** Solegram: the logo takes gradientColor1/2 as its sun and lines colours. */
+    public boolean sgCustom;
+    private int sgCustomHandle = -1;
     public int gradientColor2;
     public float normalSpec = 0.2f;
     public int normalSpecColor = Color.WHITE;
@@ -226,6 +229,7 @@ public class Icon3D {
         modelIndexHandle = GLES20.glGetUniformLocation(mProgramObject, "modelIndex");
         typeHandle = GLES20.glGetUniformLocation(mProgramObject, "type");
         nightHandle = GLES20.glGetUniformLocation(mProgramObject, "night");
+        sgCustomHandle = GLES20.glGetUniformLocation(mProgramObject, "sgCustom");
         timeHandle = GLES20.glGetUniformLocation(mProgramObject, "time");
 
         buffers = new int[3 * N];
@@ -366,6 +370,9 @@ public class Icon3D {
         GLES20.glUniform2f(resolutionHandle, width, height);
         GLES20.glUniform4f(gradientPositionHandle, gradientStartX, gradientScaleX, gradientStartY, gradientScaleY);
         GLES20.glUniform1i(nightHandle, night ? 1 : 0);
+        if (sgCustomHandle >= 0) {
+            GLES20.glUniform1f(sgCustomHandle, sgCustom ? 1f : 0f);
+        }
 
         time += dt;
         GLES20.glUniform1f(timeHandle, time);

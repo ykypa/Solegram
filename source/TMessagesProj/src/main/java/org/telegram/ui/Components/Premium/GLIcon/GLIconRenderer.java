@@ -63,6 +63,8 @@ public class GLIconRenderer implements GLSurfaceView.Renderer {
 
     private final int style;
     private final int type;
+    /** Solegram: the 3D logo's colours (0 = the intro's own coral gradient). */
+    public volatile int sgSun, sgLines;
     public final static int FRAGMENT_STYLE = 0;
     public final static int DIALOG_STYLE = 1;
     public boolean isDarkBackground;
@@ -151,6 +153,12 @@ public class GLIconRenderer implements GLSurfaceView.Renderer {
             model.night = night;
             model.gradientColor1 = color1;
             model.gradientColor2 = color2;
+            if (type == Icon3D.TYPE_SOLEGRAM && sgSun != 0) {
+                // Solegram: the logo in the launcher icon's own colours (the sun, the lines)
+                model.gradientColor1 = sgSun;
+                model.gradientColor2 = sgLines;
+                model.sgCustom = true;
+            }
             model.draw(mMVPMatrix, mRotationMatrix, mWidth, mHeight, gradientStartX, gradientScaleX, gradientStartY, gradientScaleY, white, golden, dt);
         }
     }

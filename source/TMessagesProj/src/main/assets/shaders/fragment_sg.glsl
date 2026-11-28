@@ -6,12 +6,21 @@ uniform float f_alpha;
 uniform mat4 world;
 uniform float white;
 uniform float time;
+// 1: the colours come from the app (the launcher icon's logo: gradientColor1 = sun, gradientColor2 = lines)
+uniform float sgCustom;
+uniform vec3 gradientColor1;
+uniform vec3 gradientColor2;
 
 varying vec3 vNormal;
 varying vec2 vUV;
 varying vec3 modelViewVertex;
 
 vec3 partColor(float part, float t) {
+    if (sgCustom > 0.5) {
+        // a light logo: a slight shade from top to bottom keeps its form readable
+        vec3 c = part < 0.3 ? gradientColor1 : gradientColor2;
+        return mix(c, c * 0.88, t);
+    }
     if (part < 0.3) return mix(RGB#FFB52E, RGB#FF6A2F, t);
     if (part < 0.7) return mix(RGB#FF7A3A, RGB#F2512C, t);
     return mix(RGB#F45A30, RGB#DC3A22, t);
@@ -29,8 +38,11 @@ void main() {
     float dKey = max(dot(n, key), 0.0);
     float dFill = max(dot(n, fill), 0.0);
     float dRim = max(dot(n, rim), 0.0);
-    vec3 color = base * (0.42 + 0.62 * dKey + 0.18 * dFill);
-    color += RGB#FF8A5C * 0.35 * dRim;
+    // a light logo on its coloured tile is lit more softly (it would turn grey in the intro's contrast)
+    float lo = sgCustom > 0.5 ? 0.70 : 0.42;
+    float hi = sgCustom > 0.5 ? 0.36 : 0.62;
+    vec3 color = base * (lo + hi * dKey + 0.18 * dFill);
+    color += (sgCustom > 0.5 ? base : RGB#FF8A5C) * 0.35 * dRim;
 
     // a soft clear coat: wide highlight from the key light, a thin moving glint
     vec3 h = normalize(key + v);
@@ -41,7 +53,7 @@ void main() {
 
     // the edges light up a little, as on the preview
     float fresnel = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-    color += RGB#FFC27A * fresnel * 0.18;
+    color += (sgCustom > 0.5 ? vec3(1.0) : RGB#FFC27A) * fresnel * 0.18;
 
     color = min(color, vec3(1.0));
     gl_FragColor = mix(vec4(color, 1.0) * f_alpha, vec4(1.0), white);
